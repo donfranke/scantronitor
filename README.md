@@ -26,11 +26,6 @@ The authors intend to make the code of the application free for
 general use.  If you distribute this code, please give include credit 
 for the	original authors since they put a lot of time into this:
 
-  Don Franke
-  Josh Stevens
-  Pete Babcock
-
-
 # Setting Up the Server
 
 Install Apache2 with PHP support on Ubuntu:
