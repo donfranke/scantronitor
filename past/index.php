@@ -20,13 +20,12 @@
 <?include '../creds.php'?>
 
 <?
-    date_default_timezone_set('America/Chicago');
     # variables
     $currenttag = "";
     $aryData = array();
     $aryDetails = array();
     $aryDetails2 = array();
-    $aryColor = array("#BFD0A4","#9DD7B9","#A2A0D4","#9FCFD5","#D0D0A4","#D0B7A4","#D0A4A4","#CFA1D3","#72C06C","#6DBBBF","#6B86C1","#BBBD6F","#BB9B71","#B97373","#BE4696","#4CB866","#4CB3B8","#4F6FB5","#BABA4A","#BA8D4A","#BA4A4A");
+    $aryColor = array("#E7972D","#9DD7B9","#A2A0D4","#9FCFD5","#D0D0A4","#D0B7A4","#D0A4A4","#CFA1D3","#72C06C","#6DBBBF","#6B86C1","#BBBD6F","#BB9B71","#B97373","#BE4696","#4CB866","#4CB3B8","#4F6FB5","#BABA4A","#BA8D4A","#BA4A4A");
     $aryTemp = array();
     $aryTemp2 = array();
     $error="false";
@@ -55,8 +54,15 @@
     $currDate = $currYear . "-" . $currMonth . "-" . "01";
     
     if($currYear=="2016") {
-        $aryOffset = array(-1,5,1,2,5,0,3,5,1,4,6,2,4);
+	    $aryOffset = array(-1,5,1,2,5,0,3,5,1,4,6,2,4);
+    }	
+    if($currYear=="2017") {
+	    $aryOffset = array(-1,0,3,3,6,1,4,6,2,5,0,3,5);
+    }		
+    if($currYear=="2018") {
+    	$aryOffset = array(-1,1,4,4,0,2,5,0,3,6,1,4,6);
     }
+
     $dtCurrMonth = strtotime(date("Y-m-d", strtotime($currDate)));
     $currMonth =date("m", $dtCurrMonth);  
     $currMonthName = date("F", $dtCurrMonth);  
@@ -105,27 +111,47 @@
         for($i=0;$i<count($aryHost);$i++) {
             $IPAddr = gethostbyname(trim($aryHost[$i]));
             $aryIPs[$i] = $IPAddr;
-            $IPList .= $IPAddr . ",";
+            $IPList .= $IPAddr;
+	    if($i<count($aryHost)-1) { $IPList .= ","; }
         }
     }
     $IPList = str_replace(", ",",",$IPList);
     
     # build URL for API call
-    $url="https://qualysapi.qualys.com/msp/scan_target_history.php?date_from=" . $currYear . "-" . $currMonth . "-01T06:00:00Z&date_to=" . $currYear . "-" . $nextMonth2 . "-01T06:00:00Z&ips=" . $IPList . "&ip_targeted_list=1&detailed_history=1";
+    // $url="https://qualysapi.qualys.com/msp/scan_target_history.php?date_from=" . $currYear . "-" . $currMonth . "-01T06:00:00Z&date_to=" . $currYear . "-" . $nextMonth2 . "-01T06:00:00Z&ips=" . $IPList . "&ip_targeted_list=1&detailed_history=1";
+    //$url=$apiprefix."/msp/scan_target_history.php?date_from=" . $currYear . "-" . $currMonth . "-01T06:00:00Z&date_to=" . $currYear . "-" . $nextMonth2 . "-01T06:00:00Z&ips=" . $IPList . "&ip_targeted_list=1&detailed_history=1";
+
+    $url = "https://qualysapi.qg2.apps.qualys.com/api/2.0/fo/scan/?action=list&state=Finished&target=" . $IPList; // Qualys API v2 only running scans
+    $error = "";
+    $aryData = array();
 
     // set URL and other appropriate options
-    $ch = curl_init(); 
+    $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_HEADER, false);
-    curl_setopt($ch, CURLOPT_USERPWD, $username .':'.$password); 
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
-    
+    curl_setopt($ch, CURLOPT_USERPWD, $username .':'.$password);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+    // added these
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+    curl_setopt($ch, CURLOPT_PROXY, $proxy);
+    curl_setopt($ch, CURLOPT_PROXYUSERPWD, $proxyuserpwd);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+
+    // added these for api 2
+    curl_setopt($ch, CURLOPT_HEADER, 1);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array('X-Requested-With: Curl'));
+
     // grab XML data
-    if($IPList!="") {
-        $xmldata = curl_exec($ch);
-    }
-    if(trim($xmldata) == "ACCESS DENIED") {
-        die(sprintf("ACCESS DENIED.  Please check credentials."));
+    $xmldata = curl_exec($ch);
+
+    //print $xmldata; // DEBUG
+
+    $indexof = strrpos($xmldata, "<?xml version");
+    $xmldata = substr($xmldata, $indexof);          // strip off the extra text before the xml
+
+    //print $xmldata; // DEBUG
+    if(!$xmldata){
+            print curl_error($ch);
     }
     
     $tag_tree = array();
@@ -151,29 +177,17 @@
             global $currentIP;
             
             if(strlen($name)>0&&$name!="") {
-
-                # capture IP
-                if($currenttag=="IP" && $name!="NB_SCANS") {
-                    $aryData[$i][0] = $name;
-                    $currentIP = $name;
-                }
-
-                # capture number of scans
-                if($currenttag=="NB_SCANS" && $name!="IP_DETAILED_HISTORY") {
-                    $name = str_replace(",",", ",$name);
-                }
-
+                
                 # capture date
-                if($currenttag=="DATE" && $name!="STATUS") {
-                    $aryData[$i][0] = $currentIP;
-                    $finishTime = $name;
+                if($currenttag=="LAUNCH_DATETIME" && $name!="DURATION") {
+                    $launchTime = $name;
 
                     # convert to datetime
-                    $temp = split("-",$finishTime);
+                    $temp = split("-",$launchTime);
                     $year = $temp[0];
                     $month = $temp[1];
                     $day = substr($temp[2],0,2);
-                    $temp = split(":",$finishTime);
+                    $temp = split(":",$launchTime);
                     $hour = $temp[0];
                     $hour = substr($temp[0],12,strlen($hour)-12);
                     if(strlen($hour)==1) {
@@ -182,40 +196,32 @@
                     $minute = $temp[1];
                     $second = substr($temp[2],0,2);
     
-                    $finishTime = date("Y\-m\-d H:m:s", mktime($hour-5,$minute,$second,$month,$day,$year));
+                    //$launchTime = date("Y\-m\-d H:i:s", mktime($hour-5,$minute,$second,$month,$day,$year));
+
+		    $thetime = strtotime($name);
+		    $launchTime = date("Y\-m\-d h:i:s a", $thetime);
 
                     # subtract 5 hours to make it CST (instead of GMT)
-                    $aryData[$i][1] = $finishTime;     
+                    $aryData[$i][1] = $launchTime;     
                 }
     
                 # capture scan type
-                if($currenttag=="SCAN_TYPE"&&$name!="SCAN_TITLE") {
+                if($currenttag=="TYPE"&&$name!="TITLE") {
                     $aryData[$i][3] = $name;
                 }
 
-                # capture scan return code (if there's an error)
-                if($currenttag=="RETURN") {
-                    if(strpos($name,"This API cannot be run")>-1) {
-                        global $error;
-                        global $errormsg;
-                        $error="true";
-                        $errormsg = $name;
-                    }
-                }
-
                 # capture title
-                if($currenttag=="SCAN_TITLE"&&$name!="OPTION_PROFILE_TITLE") {
+                if($currenttag=="TITLE"&&$name!="USER_LOGIN") {
                     $aryData[$i][4] = $name;   
-                    $aryData[$i][4] = str_replace("\"","",$aryData[$i][4]);        
                 }
 
-                # capture status
-                if($currenttag=="STATUS"&&$name!="REF") {
-                    $aryData[$i][2] = $name;           
+                # capture duration
+                if($currenttag=="DURATION"&&$name!="PROCESSED") {
+                    $aryData[$i][2] = $name;   
                 }
 
-                # capture profile
-                if($currenttag=="OPTION_PROFILE_TITLE"&&$name!="SCAN"&&$name!="IP_TARGETED") {
+                # capture targets
+                if($currenttag=="TARGET"&&$name!="SCAN") {
                     $aryData[$i][5] = $name;  
                     $i++;
                 }
@@ -279,7 +285,7 @@
 <html>
 	<head>
 		<title>Scantronitor</title>
-	<link rel="stylesheet" href="../scantronitor.css"/>
+	<link rel="stylesheet" href="../css/scantronitor.css"/>
     <link rel="stylesheet" type="text/css" href="../tooltip/style.css" />
     <script language="JavaScript" src="../tooltip/script.js"></script>
     <script language="javascript">
@@ -308,12 +314,17 @@
 <table border=0><tr>
 <td valign=top width=200 align=center class="data">
 <form name="frmMain2" action="index.php">
-    <br><br>
-    <img src="../images/servers.png" alt="Server[s]"><br>
-    <textarea name="hosts" rows=15 cols=22><?=$HostList?></textarea>
-    <p align=left>Enter only a single host name or IP address, or a list of host names and IP addresses, separated by comma (20 entries maximum.)</p>
-    	<p align=left>Hover over a server block to view the details.</p>
-        <br><input type="button" value="Search" class="button1" onClick="javascript:submitForm()">
+<br><br><img src="../images/servers.png" alt="Server[s]"><br>
+										   <textarea 
+										   name="hosts" 
+										   rows=15 cols=22><?=$HostList?></textarea>
+<p align=left>Enter an <b><u>IP address or hostname</u></b>, or a list of IP addresses/hostname,
+								   separated by comma (20 entries 
+										   maximum.)</p>
+	<p align=left>Hover over a server block to view the details.</p><br><input 
+		type="button" 
+										   value="Search" class="button1" 
+										   onClick="javascript:submitForm()">
 </form>
 </td>
  <td width=50> &nbsp; </td>
@@ -328,9 +339,8 @@
     <?}?>
     </td>
 
-    <td width=600 align=center class="showdate">
-        <?=($currMonthName)?>    
-        <?=strtolower($currYear)?>
+    <td width=600 align=center><img src=../images/<?=strtolower($currMonthName)?>.png> 
+    <img src=../images/<?=strtolower($currYear)?>.png>
     </td>
     <td width=90 align=right>
     <?if($currMonth==$nextmonth) {?>
@@ -362,7 +372,7 @@
              
              # highlight today's date
              if((int)date("d")==$currNum&&(int)date("m")==(int)$currMonth) {
-                 $color="#ffffcc";
+		  $color="#E7972D";
              } else {
                  $color="#ffffff";
              }
@@ -373,36 +383,16 @@
                 print "<td class='box100' bgcolor='$color'>" . (int)$currNum . "<br>";
                 # write out any events that are appropriate for cell (calendar date)
                 # iterate thru array and show what matches
+	        $dayCount = 0;
                 for($k=0;$k<$dataTotal;$k++) {
                     $dataDay = substr($aryData[$k][1],8,2);
                     $dataMonth = substr($aryData[$k][1],5,2);
                     if((int)$dataDay==(int)$currNum&&(int)$currMonth==(int)$dataMonth) {
-                        $Hostname = gethostbyaddr($aryData[$k][0]);
-
-                        if(strpos($Hostname,".")>-1) {
-                            $Hostname = substr($Hostname,0,strpos($Hostname,"."));
-                        }
-                        # find matching color
-                        for($p=0;$p<count($aryHost);$p++) {
-                            $HostFromArray = trim($aryHost[$p]);
-                            if(is_numeric(substr($HostFromArray,0,1))) {
-                                $HostFromArray = gethostbyaddr($HostFromArray);
-                                # grab everything left of first dot
-                                $HostFromArray = substr($HostFromArray,0,strpos($HostFromArray,"."));
-                            }
-                            # if it's numeric, then it's an IP
-                            if($Hostname==$HostFromArray) {
-                                $cellColor = $aryColor[$p];
-                                if(getBrightness($cellColor)<100) {
-                                    $fontColor="#ffffff";
-                                } else {
-                                    $fontColor="#000000";
-                                }
-                            }
-                        }
-
-                        $detailString = "IP: " . $aryData[$k][0] . "<br>Started: ". $aryData[$k][1] . " CST<br>Type: " . $aryData[$k][3] . "<br>Title: " . $aryData[$k][4] . "<br>Profile: " . $aryData[$k][5];
-                        print "<table><tr><td onmouseover=\"tooltip.show('" . $detailString . "')\" class=element bgcolor=" . $cellColor . " onmouseout=\"tooltip.hide();\"><font color='" . $fontColor . "'> " . $Hostname . "</font></td></tr></table>";
+			$dayCount = $dayCount + 1;
+			$cellColor = $aryColor[$dayCount];
+			$fontcolor = "#000000";
+                        $detailString = "Started: ". $aryData[$k][1] . " CST<br/>Duration: " . $aryData[$k][2] . " Hours<br/>Type: " . $aryData[$k][3] . "<br/>Title: " . $aryData[$k][4]  ;
+                        print "<table><tr><td align=center onmouseover=\"tooltip.show('" . $detailString . "')\" class=element bgcolor=" . $cellColor . " onmouseout=\"tooltip.hide();\"><font color='" . $fontColor . "'> " . $aryData[$k][5] . "</td></tr></table>";
                     }
                 }
 
@@ -424,6 +414,7 @@
 <td valign=top width=200>
     <br>
     <br>
+<!--
     <table border=0 cellspacing=0 cellpadding=5>
         <tr>
             <td>
@@ -448,6 +439,7 @@
     </td>
     </tr>
     </table>
+-->
     </p>
 
 </td> 
@@ -455,8 +447,9 @@
 </table>
 <?}?>
 
+<p align="center"><b>NOTE:</b> Site works best in Internet Explorer or Chrome.  Search for a server then hover over the date to see scan details.</p>
+
 <?include '../footer.php'?>
 
 </body>
 </html>
-
